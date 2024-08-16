@@ -1,7 +1,6 @@
 """
-Script based on code ported from https://github.com/yang-song/score_sde_pytorch/blob/main/run_lib.py
+Script based on code originally ported from https://github.com/yang-song/score_sde_pytorch/blob/main/run_lib.py
 """
-
 import configs
 import tensorflow as tf
 import os
@@ -9,9 +8,36 @@ from torch.utils import tensorboard
 import torch
 import logging
 import numpy as np
+import utils
+import architectures
+from externals.score_sde_pytorch.models.ema import ExponentialMovingAverage
+import sde_lib
+import losses
+from externals.score_sde_pytorch.utils import save_checkpoint, restore_checkpoint
+import sampling
+from torch.utils.data import DataLoader
+import datasets
+import plotting
+import pickle
 
 def run_train(config, workdir):
-  
+
+    # create workdir
+    tf.io.gfile.makedirs(workdir)
+
+    # setup logging
+    logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(os.path.join(workdir, ".log")),
+        logging.StreamHandler()
+    ]
+    )
+    
+    # fix seeds
+    torch.manual_seed(config.seed)
+
     # Create directories for experimental logs
     sample_dir = os.path.join(workdir, "samples")
     tf.io.gfile.makedirs(sample_dir)
@@ -20,8 +46,12 @@ def run_train(config, workdir):
     tf.io.gfile.makedirs(tb_dir)
     writer = tensorboard.SummaryWriter(tb_dir)
 
+
+    with open(os.path.join(workdir, 'config.pickle'), "wb") as handle:
+        pickle.dump(config, handle)
+
     # Initialize model.
-    score_model = mutils.create_model(config)
+    score_model = architectures.create_model(config)
     ema = ExponentialMovingAverage(score_model.parameters(), decay=config.model.ema_rate)
     optimizer = losses.get_optimizer(config, score_model.parameters())
     state = dict(optimizer=optimizer, model=score_model, ema=ema, step=0)
@@ -37,13 +67,17 @@ def run_train(config, workdir):
     initial_step = int(state['step'])
 
     # Build data iterators
-    train_ds, eval_ds, _ = datasets.get_dataset(config,
-                                                uniform_dequantization=config.data.uniform_dequantization)
-    train_iter = iter(train_ds)  # pytype: disable=wrong-arg-types
-    eval_iter = iter(eval_ds)  # pytype: disable=wrong-arg-types
-    # Create data normalizer and its inverse
-    scaler = datasets.get_data_scaler(config)
-    inverse_scaler = datasets.get_data_inverse_scaler(config)
+    rand_gen_torch = torch.Generator()
+    rand_gen_torch.manual_seed(config.seed)
+    datadir = os.path.join(workdir, "data")
+    train_ds, eval_ds, distribution = datasets.get_dataset(config, datadir)
+    train_dl = DataLoader(train_ds, batch_size=config.training.batch_size, generator=rand_gen_torch, shuffle=True)
+    eval_dl = DataLoader(eval_ds, batch_size=config.eval.batch_size, generator=rand_gen_torch, shuffle=True)
+    train_iter = iter(train_dl)
+    eval_iter = iter(eval_dl) 
+    # Create data normalizer and its inverse (needed for Yang Song's code)
+    scaler = lambda x: x
+    inverse_scaler = lambda x: x
 
     # Setup SDEs
     if config.training.sde.lower() == 'vpsde':
@@ -62,28 +96,17 @@ def run_train(config, workdir):
     # Build one-step training and evaluation functions
     optimize_fn = losses.optimization_manager(config)
     continuous = config.training.continuous
-    reduce_mean = config.training.reduce_mean
     likelihood_weighting = config.training.likelihood_weighting
     train_step_fn = losses.get_step_fn(sde, train=True, optimize_fn=optimize_fn,
-                                        reduce_mean=reduce_mean, continuous=continuous,
+                                        reduce_mean=True, continuous=continuous,
                                         likelihood_weighting=likelihood_weighting)
-    eval_step_fn = losses.get_step_fn(sde, train=False, optimize_fn=optimize_fn,
-                                        reduce_mean=reduce_mean, continuous=continuous,
+    eval_step_fn1 = losses.get_step_fn(sde, train=False, optimize_fn=optimize_fn,
+                                        reduce_mean=True, continuous=continuous,
                                         likelihood_weighting=likelihood_weighting)
 
     # Building sampling functions
     if config.training.snapshot_sampling:
-        sampling_shape = (config.training.batch_size, config.data.num_channels,
-                        config.data.image_size, config.data.image_size)
-        sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps)
-
-    num_train_steps = config.training.n_iters
-
-
-    # Building sampling functions
-    if config.training.snapshot_sampling:
-        sampling_shape = (config.training.batch_size, config.data.num_channels,
-                        config.data.image_size, config.data.image_size)
+        sampling_shape = (config.eval.batch_size, config.data.dim)
         sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps)
 
     num_train_steps = config.training.n_iters
@@ -92,15 +115,14 @@ def run_train(config, workdir):
     logging.info("Starting training loop at step %d." % (initial_step,))
 
     for step in range(initial_step, num_train_steps + 1):
-        # Convert data to JAX arrays and normalize them. Use ._numpy() to avoid copy.
-        batch = torch.from_numpy(next(train_iter)['image']._numpy()).to(config.device).float()
-        batch = batch.permute(0, 3, 1, 2)
-        batch = scaler(batch)
+        # Get batch
+        batch, train_iter = sample_batch(train_iter, train_dl)
+        batch = scaler(batch).to(config.device).float()
         # Execute one training step
         loss = train_step_fn(state, batch)
         if step % config.training.log_freq == 0:
-            logging.info("step: %d, training_loss: %.5e" % (step, loss.item()))
-            writer.add_scalar("training_loss", loss, step)
+            logging.info("step: %d, Training Loss (DSM): %.5e" % (step, loss.item()))
+            writer.add_scalar("training_loss_dsm", loss, step)
 
         # Save a temporary checkpoint to resume training after pre-emption periodically
         if step != 0 and step % config.training.snapshot_freq_for_preemption == 0:
@@ -108,40 +130,47 @@ def run_train(config, workdir):
 
         # Report the loss on an evaluation dataset periodically
         if step % config.training.eval_freq == 0:
-            eval_batch = torch.from_numpy(next(eval_iter)['image']._numpy()).to(config.device).float()
-            eval_batch = eval_batch.permute(0, 3, 1, 2)
-            eval_batch = scaler(eval_batch)
-            eval_loss = eval_step_fn(state, eval_batch)
-            logging.info("step: %d, eval_loss: %.5e" % (step, eval_loss.item()))
-            writer.add_scalar("eval_loss", eval_loss.item(), step)
+            eval_batch, eval_iter = sample_batch(eval_iter, eval_dl)
+            eval_batch = scaler(eval_batch).to(config.device).float()
+            eval_loss = eval_step_fn1(state, eval_batch)
+            logging.info("step: %d, Eval Loss (DSM): %.5e" % (step, eval_loss.item()))
+            writer.add_scalar("eval_loss_dsm", eval_loss.item(), step)
 
-    # Save a checkpoint periodically and generate samples if needed
-    if step != 0 and step % config.training.snapshot_freq == 0 or step == num_train_steps:
-        # Save the checkpoint.
-        save_step = step // config.training.snapshot_freq
-        save_checkpoint(os.path.join(checkpoint_dir, f'checkpoint_{save_step}.pth'), state)
+        # Save a checkpoint periodically and generate samples if needed
+        # step != 0 and 
+        if step % config.training.snapshot_freq == 0 or step == num_train_steps:
+            # Save the checkpoint.
+            save_step = step // config.training.snapshot_freq
+            save_checkpoint(os.path.join(checkpoint_dir, f'checkpoint_{save_step}.psth'), state)
 
-        # Generate and save samples
-        if config.training.snapshot_sampling:
-            ema.store(score_model.parameters())
-            ema.copy_to(score_model.parameters())
-            sample, n = sampling_fn(score_model)
-            ema.restore(score_model.parameters())
-            this_sample_dir = os.path.join(sample_dir, "iter_{}".format(step))
-            tf.io.gfile.makedirs(this_sample_dir)
-            nrow = int(np.sqrt(sample.shape[0]))
-            image_grid = make_grid(sample, nrow, padding=2)
-            sample = np.clip(sample.permute(0, 2, 3, 1).cpu().numpy() * 255, 0, 255).astype(np.uint8)
-            with tf.io.gfile.GFile(
-                os.path.join(this_sample_dir, "sample.np"), "wb") as fout:
-                np.save(fout, sample)
+            # Generate and save samples
+            if config.training.snapshot_sampling:
+                # sample batch
+                ema.store(score_model.parameters())
+                ema.copy_to(score_model.parameters())
+                sample, n = sampling_fn(score_model)
+                ema.restore(score_model.parameters())
+                # save samples
+                this_sample_dir = os.path.join(sample_dir, "iter_{}".format(step))
+                tf.io.gfile.makedirs(this_sample_dir)
+                sample = sample.cpu()
+                with open(os.path.join(this_sample_dir, "samples.pt"), "wb") as fout:
+                    torch.save(sample, fout)
+                # compate to ground truth samples
+                fout = os.path.join(this_sample_dir, "samples.png")
+                eval_batch, eval_iter = sample_batch(eval_iter, eval_dl)
+                plotting.comp_generative_w_gt(sample, eval_batch.cpu(), fout)
 
-            with tf.io.gfile.GFile(
-                os.path.join(this_sample_dir, "sample.png"), "wb") as fout:
-                save_image(image_grid, fout)
+def sample_batch(data_iter, dl):
+    try:
+        batch = next(data_iter)[0]
+    except:
+        data_iter = iter(dl)
+        batch = next(data_iter)[0]
+    return batch, data_iter
 
 
 if __name__ == "__main__":
     config = configs.default_config()
-    workdir = 'Test'
+    workdir = 'results/081524ThirdTrain'
     run_train(config, workdir)
