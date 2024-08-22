@@ -51,7 +51,7 @@ def run_train(config, workdir):
         pickle.dump(config, handle)
 
     # Initialize model.
-    score_model = architectures.create_model(config)
+    score_model = architectures.create_model(config) # TODO: must include is_energy param
     ema = ExponentialMovingAverage(score_model.parameters(), decay=config.model.ema_rate)
     optimizer = losses.get_optimizer(config, score_model.parameters())
     state = dict(optimizer=optimizer, model=score_model, ema=ema, step=0)
@@ -97,17 +97,18 @@ def run_train(config, workdir):
     optimize_fn = losses.optimization_manager(config)
     continuous = config.training.continuous
     likelihood_weighting = config.training.likelihood_weighting
+    is_energy = config.model.is_energy
     train_step_fn = losses.get_step_fn(sde, train=True, optimize_fn=optimize_fn,
                                         reduce_mean=True, continuous=continuous,
-                                        likelihood_weighting=likelihood_weighting)
+                                        likelihood_weighting=likelihood_weighting, is_energy=is_energy)
     eval_step_fn1 = losses.get_step_fn(sde, train=False, optimize_fn=optimize_fn,
                                         reduce_mean=True, continuous=continuous,
-                                        likelihood_weighting=likelihood_weighting)
+                                        likelihood_weighting=likelihood_weighting, is_energy=is_energy)
 
     # Building sampling functions
     if config.training.snapshot_sampling:
         sampling_shape = (config.eval.batch_size, config.data.dim)
-        sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps)
+        sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps, is_energy=is_energy) 
 
     num_train_steps = config.training.n_iters
 
@@ -138,7 +139,7 @@ def run_train(config, workdir):
 
         # Save a checkpoint periodically and generate samples if needed
         # step != 0 and 
-        if step % config.training.snapshot_freq == 0 or step == num_train_steps:
+        if (step % config.training.snapshot_freq == 0 or step == num_train_steps):
             # Save the checkpoint.
             save_step = step // config.training.snapshot_freq
             save_checkpoint(os.path.join(checkpoint_dir, f'checkpoint_{save_step}.psth'), state)
@@ -172,5 +173,5 @@ def sample_batch(data_iter, dl):
 
 if __name__ == "__main__":
     config = configs.default_config()
-    workdir = 'results/081524ThirdTrain'
+    workdir = 'results/082124Energy2'
     run_train(config, workdir)

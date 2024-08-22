@@ -22,6 +22,7 @@ Ported from https://github.com/yang-song/score_sde_pytorch/blob/main/models/util
 import torch
 import sde_lib
 import numpy as np
+import torch.autograd as autograd
 from architectures import get_model
 
 
@@ -72,7 +73,7 @@ def create_model(config):
   return score_model
 
 
-def get_model_fn(model, train=False):
+def get_model_fn(model, train=False, energy=False):
   """Create a function to give the output of the score-based model.
 
   Args:
@@ -94,17 +95,32 @@ def get_model_fn(model, train=False):
     Returns:
       A tuple of (model output, new mutable states)
     """
-    if not train:
-      model.eval()
-      return model(x, labels)
+    if not energy:
+      if not train:
+        model.eval()
+        with torch.no_grad():
+          return model(x, labels)
+      else:
+        model.train()
+        return model(x, labels)
     else:
-      model.train()
-      return model(x, labels)
+      x.requires_grad_(True)
+      if not train:
+        model.eval()
+        #model.train()
+      else:
+        model.train()
+      logp = -model(x, labels).sum()
+      grad = autograd.grad(logp, x, create_graph=True)[0]
+      if not train:
+        grad = grad.detach()
+      x.requires_grad_(False)
+      return grad
 
   return model_fn
 
 
-def get_score_fn(sde, model, train=False, continuous=False):
+def get_score_fn(sde, model, train=False, continuous=False, energy=False):
   """Wraps `score_fn` so that the model output corresponds to a real time-dependent score function.
 
   Args:
@@ -116,7 +132,7 @@ def get_score_fn(sde, model, train=False, continuous=False):
   Returns:
     A score function.
   """
-  model_fn = get_model_fn(model, train=train)
+  model_fn = get_model_fn(model, train=train, energy=energy)
 
   if isinstance(sde, sde_lib.VPSDE) or isinstance(sde, sde_lib.subVPSDE):
     def score_fn(x, t):

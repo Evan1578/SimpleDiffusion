@@ -11,9 +11,8 @@ def default_config():
 
     config.training = training = ml_collections.ConfigDict()
     training.batch_size = 8000
-    training.n_iters = 20000
-    training.num_train = 15000
-    training.num_val = 5000
+    training.n_iters = 50000
+    training.num_train = 80000
     training.log_freq = 50
     training.eval_freq = 100
     training.snapshot_freq = 5000
@@ -27,18 +26,19 @@ def default_config():
     eval.batch_size = 8000
     eval.num_eval = 20000
 
-
     config.optim = optim = ml_collections.ConfigDict()
     optim.optimizer = 'Adam'
     optim.lr = 1e-5
     optim.beta1 = .9
     optim.eps = 1e-8
     optim.amsgrad = False
-    optim.warmup = 0.
+    optim.warmup = 5000
     optim.weight_decay = 0.
     optim.grad_clip = -1.
 
     config.model = model = ml_collections.ConfigDict()
+    model.is_energy = True
+    model.use_batch_norm = False
     model.name = 'ToyConditionalModel'
     model.sigma_min = .01
     model.sigma_max = 10
@@ -46,7 +46,7 @@ def default_config():
     model.ema_rate = 0.9999
     model.num_hidden1 = 4
     model.num_hidden2 = 2
-    model.activation = 'ReLU'
+    model.activation = 'Softplus'
     model.hidden_dim = 512
     model.init_type = 'none'
     model.weight_decay = 0.

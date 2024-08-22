@@ -52,7 +52,7 @@ def optimization_manager(config):
   return optimize_fn
 
 
-def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_weighting=True, eps=1e-5):
+def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_weighting=True, eps=1e-5, is_energy=False):
   """Create a loss function for training with arbirary SDEs.
 
   Args:
@@ -80,7 +80,7 @@ def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_we
     Returns:
       loss: A scalar that represents the average loss value across the mini-batch.
     """
-    score_fn = mutils.get_score_fn(sde, model, train=train, continuous=continuous)
+    score_fn = mutils.get_score_fn(sde, model, train=train, continuous=continuous, energy=is_energy)
     t = torch.rand(batch.shape[0], device=batch.device) * (sde.T - eps) + eps
     z = torch.randn_like(batch)
     mean, std = sde.marginal_prob(batch, t)
@@ -101,7 +101,7 @@ def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_we
   return loss_fn
 
 
-def get_smld_loss_fn(vesde, train, reduce_mean=False):
+def get_smld_loss_fn(vesde, train, reduce_mean=False, is_energy=False):
   """Legacy code to reproduce previous results on SMLD(NCSN). Not recommended for new work."""
   assert isinstance(vesde, VESDE), "SMLD training only works for VESDEs."
 
@@ -110,7 +110,7 @@ def get_smld_loss_fn(vesde, train, reduce_mean=False):
   reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
 
   def loss_fn(model, batch):
-    model_fn = mutils.get_model_fn(model, train=train)
+    model_fn = mutils.get_model_fn(model, train=train, energy=is_energy)
     labels = torch.randint(0, vesde.N, (batch.shape[0],), device=batch.device)
     sigmas = smld_sigma_array.to(batch.device)[labels]
     noise = torch.randn_like(batch) * sigmas[:, None]
@@ -125,14 +125,14 @@ def get_smld_loss_fn(vesde, train, reduce_mean=False):
   return loss_fn
 
 
-def get_ddpm_loss_fn(vpsde, train, reduce_mean=True):
+def get_ddpm_loss_fn(vpsde, train, reduce_mean=True, is_energy=False):
   """Legacy code to reproduce previous results on DDPM. Not recommended for new work."""
   assert isinstance(vpsde, VPSDE), "DDPM training only works for VPSDEs."
 
   reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
 
   def loss_fn(model, batch):
-    model_fn = mutils.get_model_fn(model, train=train)
+    model_fn = mutils.get_model_fn(model, train=train, energy=is_energy)
     labels = torch.randint(0, vpsde.N, (batch.shape[0],), device=batch.device)
     sqrt_alphas_cumprod = vpsde.sqrt_alphas_cumprod.to(batch.device)
     sqrt_1m_alphas_cumprod = vpsde.sqrt_1m_alphas_cumprod.to(batch.device)
@@ -148,7 +148,7 @@ def get_ddpm_loss_fn(vpsde, train, reduce_mean=True):
   return loss_fn
 
 
-def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True, likelihood_weighting=False, gt_dist=None):
+def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True, likelihood_weighting=False, is_energy=False):
   """Create a one-step training/evaluation function.
 
   Args:
@@ -164,13 +164,13 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
   """
   if continuous:
     loss_fn = get_sde_loss_fn(sde, train, reduce_mean=reduce_mean,
-                              continuous=True, likelihood_weighting=likelihood_weighting)
+                              continuous=True, likelihood_weighting=likelihood_weighting, is_energy=is_energy)
   else:
     assert not likelihood_weighting, "Likelihood weighting is not supported for original SMLD/DDPM training."
     if isinstance(sde, VESDE):
-      loss_fn = get_smld_loss_fn(sde, train, reduce_mean=reduce_mean)
+      loss_fn = get_smld_loss_fn(sde, train, reduce_mean=reduce_mean, is_energy=is_energy)
     elif isinstance(sde, VPSDE):
-      loss_fn = get_ddpm_loss_fn(sde, train, reduce_mean=reduce_mean)
+      loss_fn = get_ddpm_loss_fn(sde, train, reduce_mean=reduce_mean, is_energy=is_energy)
     else:
       raise ValueError(f"Discrete training for {sde.__class__.__name__} is not recommended.")
 
@@ -198,7 +198,8 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
         ema = state['ema']
         ema.store(model.parameters())
         ema.copy_to(model.parameters())
-        loss = loss_fn(model, batch)
+      loss = loss_fn(model, batch)
+      with torch.no_grad():
         ema.restore(model.parameters())
 
     return loss

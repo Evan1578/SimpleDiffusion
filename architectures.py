@@ -52,19 +52,37 @@ class ToyConditionalModel(nn.Module):
         self.inner_layers1 = nn.ModuleList([nn.Linear(hidden_dim, hidden_dim) for _ in range(config.model.num_hidden1)])
         self.middle_layer = nn.Linear(hidden_dim + 1, hidden_dim)
         self.inner_layers2 = nn.ModuleList([nn.Linear(hidden_dim, hidden_dim) for _ in range(config.model.num_hidden2)])
-        self.lin_out = nn.Linear(hidden_dim + 1, dim)
+        #self.energy_flag = config.model.is_energy
+        if config.model.is_energy == False:
+          self.lin_out = nn.Linear(hidden_dim + 1, dim)
+        else:
+          self.lin_out = nn.Linear(hidden_dim + 1, 1)
+        #if self.energy_flag:
+        #   self.lin_final = nn.Linear(dim, 1)
+        if hasattr(config.model, 'use_batch_norm'):
+           self.use_batch_norm = config.model.use_batch_norm
+        else:
+           self.use_batch_norm = True
 
     def forward(self, x, noise_labels):
         noise_labels = noise_labels[:, None] 
         x = torch.cat((x, noise_labels), dim=1)
-        x = self.activation(self.lin_in(x))
-        x = self.batch_norm(x)
+        x = self.lin_in(x)
+        x = self.activation(x)
+        if self.use_batch_norm:
+          x = self.batch_norm(x)
         for layer in self.inner_layers1:
-            x = self.activation(layer(x))
+            x = layer(x)
+            x = self.activation(x)
         x = torch.cat((x, noise_labels), dim=1)
-        x = self.activation(self.middle_layer(x))
+        x = self.middle_layer(x)
+        x = torch.mul(self.activation(x), x)
         for layer in self.inner_layers2:
-            x = self.activation(layer(x))
+            x = layer(x)
+            x = self.activation(x)
         x = torch.cat((x, noise_labels), dim=1)
         x = self.lin_out(x)
+        # if self.energy_flag:
+        #    x = self.activation(x)
+        #    x = self.lin_final(x)
         return x

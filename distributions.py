@@ -2,6 +2,7 @@ import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 from abc import ABC
 import numpy as np
+import math
 
 def create_distribution(config):
     dist_name = config.data.distribution_name
@@ -109,3 +110,45 @@ def get_convolved_distribution(distribution, noise_level):
         convolved_distribution = GaussianMixtureDistribution(convolved_dists, distribution.weights)
 
     return convolved_distribution
+
+
+def get_mixture_gaussian_posterior(dist, y, A, sigma):
+    """
+    Returns the Gaussian mixture posterior distribution obtained when the prior is a Gaussian mixture
+    and the likelihood is a linear Gaussian model with white noise, i.e., y = Ax + z, z \sim N(0, \sigma^2 I). 
+    Inputs:
+        dist (instance of GaussianMixtureDistribution): the prior distribution
+        y (1D torch.Tensor of length D2): the measurements
+        A (2D torch.Tensor size D1 x D2): the forward operator
+        sigma (positive scalar): the standard deviation of the noise in the forward model
+    Outputs:
+        The posterior Gaussian mixture (instance of GaussianMixtureDistribution)
+    """
+    distributions = dist.distributions
+    num_distributions = len(distributions)
+    A_tA = A.t() @ A
+    weights = dist.weights
+    new_distributions = []
+    new_weights = []
+    for idx in range(num_distributions):
+        # get weight and distribution of ith component of mixture
+        weight = weights[idx]
+        prior_gaussian = distributions[idx]
+        # compute the updated mean and covariance
+        new_precision_matrix = prior_gaussian.precision_matrix + (1/(sigma*sigma))*A_tA
+        new_covariance_matrix = torch.linalg.inv(new_precision_matrix)
+        term_1 = prior_gaussian.precision_matrix @ prior_gaussian.mean + (1/(sigma*sigma))*(A.t() @ y)
+        new_mean = new_covariance_matrix @ term_1
+        posterior_distribution = GaussianDistribution(new_mean, new_covariance_matrix)
+        # compute the new (unnormalized) weight
+        d_i = torch.exp(.5 * (new_mean.t() @ new_precision_matrix @ new_mean - prior_gaussian.mean.t() @ prior_gaussian.precision_matrix @ prior_gaussian.mean))
+        det_prior_inv = 1/ (torch.linalg.det(prior_gaussian.covariance_matrix))**(1/2)
+        det_posterior = torch.linalg.det(new_covariance_matrix)**(1/2)
+        new_weight = d_i * det_prior_inv * det_posterior * weight
+        new_distributions.append(posterior_distribution)
+        new_weights.append(new_weight.item())
+    # normalize the weights
+    sum_weights = sum(new_weights)
+    new_weights_normed = [new_weight/sum_weights for new_weight in new_weights]
+    # return posterior distribution
+    return GaussianMixtureDistribution(new_distributions, new_weights_normed)
