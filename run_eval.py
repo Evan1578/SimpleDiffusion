@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import architectures
 import losses
 from ema import ExponentialMovingAverage
-from externals.score_sde_pytorch.utils import save_checkpoint, restore_checkpoint
+from utils import save_checkpoint, restore_checkpoint
 import sampling
 import distributions
 import utils
