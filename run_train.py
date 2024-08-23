@@ -1,7 +1,7 @@
 """
 Script based on code originally ported from https://github.com/yang-song/score_sde_pytorch/blob/main/run_lib.py
 """
-import configs
+import training_configs
 import tensorflow as tf
 import os
 from torch.utils import tensorboard
@@ -10,10 +10,10 @@ import logging
 import numpy as np
 import utils
 import architectures
-from externals.score_sde_pytorch.models.ema import ExponentialMovingAverage
+from ema import ExponentialMovingAverage
 import sde_lib
 import losses
-from externals.score_sde_pytorch.utils import save_checkpoint, restore_checkpoint
+from utils import save_checkpoint, restore_checkpoint
 import sampling
 from torch.utils.data import DataLoader
 import datasets
@@ -172,6 +172,6 @@ def sample_batch(data_iter, dl):
 
 
 if __name__ == "__main__":
-    config = configs.default_config()
+    config = training_configs.default_config()
     workdir = 'results/082124Energy2'
     run_train(config, workdir)
