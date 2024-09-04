@@ -1,12 +1,14 @@
+
+from abc import ABC
+import os
+
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
-from abc import ABC
 import logging
-import distributions
 import tensorflow as tf
-import logging
-import os
 from torch.utils.data import TensorDataset
+
+import distributions
 
 def get_dataset(config, datadir):
     # create distribution

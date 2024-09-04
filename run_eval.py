@@ -1,12 +1,16 @@
 
 import os
+
 import logging
 import pickle
 import tensorflow as tf
 import torch
+from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+import geomloss
+
 import datasets
 import sde_lib
-from torch.utils.data import DataLoader
 import architectures
 import losses
 from ema import ExponentialMovingAverage
@@ -14,9 +18,7 @@ from utils import save_checkpoint, restore_checkpoint
 import sampling
 import distributions
 import utils
-import matplotlib.pyplot as plt
 import plotting
-import geomloss
 
 def run_eval(workdir, checkpoint, sde_trial):
 

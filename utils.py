@@ -1,5 +1,3 @@
-import torch
-
 # coding=utf-8
 # Copyright 2020 The Google Research Authors.
 #
@@ -19,15 +17,16 @@ import torch
 Ported from https://github.com/yang-song/score_sde_pytorch/blob/main/models/utils.py with minor modifications
 """
 
-import torch
-import sde_lib
-import numpy as np
-import torch.autograd as autograd
-from architectures import get_model
-import tensorflow as tf
-import logging
 import os
 
+import torch
+import numpy as np
+import torch.autograd as autograd
+import tensorflow as tf
+import logging
+
+import sde_lib
+from architectures import get_model
 
 def restore_checkpoint(ckpt_dir, state, device):
   if not tf.io.gfile.exists(ckpt_dir):

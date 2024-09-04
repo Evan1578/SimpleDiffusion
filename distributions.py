@@ -1,8 +1,9 @@
-import torch
-from torch.distributions.multivariate_normal import MultivariateNormal
 from abc import ABC
-import numpy as np
 import math
+
+import torch
+from torch.distributions.multivariate_normal import MultivariateNormalC
+import numpy as np
 
 def create_distribution(config):
     dist_name = config.data.distribution_name
