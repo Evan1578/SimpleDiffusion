@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import torch
 
-def comp_generative_w_gt(generative_samples, ground_truth_samples, fout):
+def comp_generative_w_gt(generative_samples, ground_truth_samples, fout, labels=['Generative Samples', 'Ground Truth Samples']):
     """
     generative_samples (torch.Tensor): tensor of size batch_size x D containing generative modeling samples
     ground_truth_samples (torch.Tensor): tensor of size batch_size x D containing ground truth samples
@@ -17,9 +17,9 @@ def comp_generative_w_gt(generative_samples, ground_truth_samples, fout):
     fig, ax = plt.subplots(figsize=(9, 9))
     ax.set_title("Random 2D Projections of Samples")
     ax.scatter(torch.minimum(torch.maximum(proj_gen_samples[:, 0], torch.tensor([-50])), torch.tensor([50])), 
-               torch.minimum(torch.maximum(proj_gen_samples[:, 1], torch.tensor([-50])), torch.tensor([50])), label='Generative Samples')
+               torch.minimum(torch.maximum(proj_gen_samples[:, 1], torch.tensor([-50])), torch.tensor([50])), label=labels[0])
     ax.scatter(torch.minimum(torch.maximum(proj_gt_samples[:, 0], torch.tensor([-50])), torch.tensor([50])), 
-               torch.minimum(torch.maximum(proj_gt_samples[:, 1], torch.tensor([-50])), torch.tensor([50])), label = 'Ground Truth Samples')
+               torch.minimum(torch.maximum(proj_gt_samples[:, 1], torch.tensor([-50])), torch.tensor([50])), label=labels[1])
     ax.legend()
     ax.grid(True)
     plt.savefig(fout)
