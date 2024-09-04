@@ -2,7 +2,7 @@ from abc import ABC
 import math
 
 import torch
-from torch.distributions.multivariate_normal import MultivariateNormalC
+from torch.distributions.multivariate_normal import MultivariateNormal
 import numpy as np
 
 def create_distribution(config):
