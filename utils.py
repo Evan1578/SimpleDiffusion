@@ -138,9 +138,10 @@ def get_model_fn(model, train=False, energy=False, use_grad=False):
       x.requires_grad_(True)
       logp = -model(x, labels).sum()
       grad = autograd.grad(logp, x, create_graph=True)[0]
-      if not train:
+      if (not train) and not(use_grad):
         grad = grad.detach()
-      x.requires_grad_(False)
+      if not(use_grad):
+        x.requires_grad_(False)
       return grad
 
   return model_fn
