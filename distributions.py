@@ -142,7 +142,7 @@ def get_mixture_gaussian_posterior(dist, y, A, sigma):
         new_mean = new_covariance_matrix @ term_1
         posterior_distribution = GaussianDistribution(new_mean, new_covariance_matrix)
         # compute the new (unnormalized) weight
-        d_i = torch.exp(.5 * ((y.t()@y)*(1/(sigma*sigma)) + new_mean.t() @ new_precision_matrix @ new_mean - prior_gaussian.mean.t() @ prior_gaussian.precision_matrix @ prior_gaussian.mean))
+        d_i = torch.exp(-.5 * ((y.t()@y)*(1/(sigma*sigma)) - new_mean.t() @ new_precision_matrix @ new_mean + prior_gaussian.mean.t() @ prior_gaussian.precision_matrix @ prior_gaussian.mean))
         det_prior_inv = 1/ (torch.linalg.det(prior_gaussian.covariance_matrix))**(1/2)
         det_posterior = torch.linalg.det(new_covariance_matrix)**(1/2)
         new_weight = d_i * det_prior_inv * det_posterior * weight
