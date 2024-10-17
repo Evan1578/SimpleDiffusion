@@ -21,7 +21,7 @@ import torch
 import torch.optim as optim
 import numpy as np
 
-from sde_lib import *
+from  .sde_lib import *
 import utils as mutils
 
 def get_optimizer(config, params):

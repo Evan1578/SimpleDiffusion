@@ -100,7 +100,7 @@ def create_model(config):
   return score_model
 
 
-def get_model_fn(model, train=False, energy=False):
+def get_model_fn(model, train=False, energy=False, use_grad=False):
   """Create a function to give the output of the score-based model.
 
   Args:
@@ -122,21 +122,20 @@ def get_model_fn(model, train=False, energy=False):
     Returns:
       A tuple of (model output, new mutable states)
     """
+
+    if train:
+      model.train()
+    else:
+      model.eval()
+
     if not energy:
-      if not train:
-        model.eval()
+      if (not train) and (not use_grad):
         with torch.no_grad():
           return model(x, labels)
       else:
-        model.train()
         return model(x, labels)
     else:
       x.requires_grad_(True)
-      if not train:
-        model.eval()
-        #model.train()
-      else:
-        model.train()
       logp = -model(x, labels).sum()
       grad = autograd.grad(logp, x, create_graph=True)[0]
       if not train:
@@ -147,7 +146,7 @@ def get_model_fn(model, train=False, energy=False):
   return model_fn
 
 
-def get_score_fn(sde, model, train=False, continuous=False, energy=False):
+def get_score_fn(sde, model, train=False, continuous=False, energy=False, use_grad=False):
   """Wraps `score_fn` so that the model output corresponds to a real time-dependent score function.
 
   Args:
@@ -159,7 +158,7 @@ def get_score_fn(sde, model, train=False, continuous=False, energy=False):
   Returns:
     A score function.
   """
-  model_fn = get_model_fn(model, train=train, energy=energy)
+  model_fn = get_model_fn(model, train=train, energy=energy, use_grad=use_grad)
 
   if isinstance(sde, sde_lib.VPSDE) or isinstance(sde, sde_lib.subVPSDE):
     def score_fn(x, t):
